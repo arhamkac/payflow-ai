@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TrustGate</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f5f7fa;color:#222}
+header{background:#1f2937;color:#fff;padding:16px 24px}
+header h1{font-size:1.4rem}
+.container{max-width:1100px;margin:24px auto;padding:0 16px}
+.card{background:#fff;border-radius:8px;padding:20px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+h2{font-size:1rem;margin-bottom:12px;color:#1f2937}
+label{display:flex;flex-direction:column;font-size:.82rem;color:#555;gap:4px;margin-bottom:10px}
+input,select,textarea{padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:.9rem}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-size:.9rem;font-weight:600;background:#2563eb;color:#fff;margin-top:8px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-sm{padding:4px 10px;font-size:.75rem;border:none;border-radius:4px;cursor:pointer;font-weight:600}
+.btn-approve{background:#16a34a;color:#fff}
+.btn-reject{background:#dc2626;color:#fff}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.83rem}
+th{background:#f0f4ff;padding:8px;text-align:left;border-bottom:2px solid #dde3f0;white-space:nowrap}
+td{padding:8px;border-bottom:1px solid #eee;vertical-align:middle}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.72rem;font-weight:700}
+.badge-AUTO_APPROVED{background:#d1f2eb;color:#1a7a5e}
+.badge-MANUAL_APPROVAL_REQUIRED{background:#fef3cd;color:#856404}
+.badge-REJECTED{background:#fde8e8;color:#922b21}
+.empty{text-align:center;color:#aaa;padding:16px}
+.msg{margin-top:8px;font-size:.83rem;padding:6px 10px;border-radius:6px;display:none}
+.msg.error{background:#fde8e8;color:#922b21;display:block}
+.msg.success{background:#d1f2eb;color:#1a7a5e;display:block}
+.logs{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-top:10px;font-size:.8rem;max-height:200px;overflow:auto}
+</style>
+</head>
+<body>
+<header><h1>TrustGate</h1></header>
+<div class="container">
+
+<div class="card">
+<h2>Register Agent</h2>
+<div class="fields">
+<label>Name <input id="agentName" /></label>
+<label>Owner Email <input id="ownerEmail" type="email" /></label>
+<label>Mandate Limit <input id="mandateLimit" type="number" step="0.01" /></label>
+<label>Per-Transaction Limit <input id="perTxLimit" type="number" step="0.01" /></label>
+<label>Allowed Categories (comma) <input id="allowedCats" value="software,cloud" /></label>
+<label>Blocked Categories (comma) <input id="blockedCats" /></label>
+</div>
+<button class="btn" onclick="createAgent()">Register Agent</button>
+<div id="agentMsg" class="msg"></div>
+</div>
+
+<div class="card">
+<h2>Agents</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Name</th><th>Trust</th><th>Autonomy %</th><th>Mandate</th><th>Auto-Spend Limit</th><th>Status</th><th>Action</th></tr></thead>
+<tbody id="agentTable"><tr><td colspan="7" class="empty">No agents yet.</td></tr></tbody>
+</table>
+</div>
+</div>
+
+<div class="card">
+<h2>Simulated Agent Payment</h2>
+<div class="fields">
+<label>Agent <select id="payAgent"></select></label>
+<label>Recipient Email <input id="recipientEmail" type="email" /></label>
+<label>Amount <input id="payAmount" type="number" step="0.01" /></label>
+<label>Currency <select id="payCurrency"><option>USD</option><option>EUR</option><option>INR</option></select></label>
+<label style="grid-column:1/3">Purpose <input id="payPurpose" /></label>
+</div>
+<button class="btn" onclick="requestPayment()">Submit Payment Request</button>
+<div id="payMsg" class="msg"></div>
+</div>
+
+<div class="card">
+<h2>Payment Feed</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Agent</th><th>Amount</th><th>Category</th><th>Risk</th><th>Autonomy %</th><th>Decision</th><th>Human</th><th>PayPal</th><th>Reason</th><th>Actions</th></tr></thead>
+<tbody id="paymentTable"><tr><td colspan="10" class="empty">No payments yet.</td></tr></tbody>
+</table>
+</div>
+<div id="logsPanel" class="logs" style="display:none"></div>
+</div>
+
+<div class="card">
+<h2>Trust History</h2>
+<label>Select Agent <select id="trustAgent" onchange="loadTrust()"></select></label>
+<div id="trustInfo" class="logs">Select an agent to view trust history.</div>
+</div>
+
+</div>
+
+<script>
+const API = "";
+function showMsg(id,text,type){const el=document.getElementById(id);el.textContent=text;el.className="msg "+type;}
+async function api(path,opts={}){
+  const res=await fetch(API+path,{headers:{"Content-Type":"application/json"},...opts});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||"Request failed");
+  return data;
+}
+
+async function createAgent(){
+  try{
+    const body={
+      name:document.getElementById("agentName").value.trim(),
+      ownerEmail:document.getElementById("ownerEmail").value.trim(),
+      mandateLimit:Number(document.getElementById("mandateLimit").value),
+      perTransactionLimit:Number(document.getElementById("perTxLimit").value),
+      allowedCategories:document.getElementById("allowedCats").value,
+      blockedCategories:document.getElementById("blockedCats").value
+    };
+    await api("/api/agents",{method:"POST",body:JSON.stringify(body)});
+    showMsg("agentMsg","Agent registered.","success");
+    await loadAgents();
+  }catch(e){showMsg("agentMsg",e.message,"error");}
+}
+
+async function loadAgents(){
+  const agents=await api("/api/agents");
+  const tbody=document.getElementById("agentTable");
+  const select=document.getElementById("payAgent");
+  const tselect=document.getElementById("trustAgent");
+  select.innerHTML="";tselect.innerHTML="";
+  if(!agents.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No agents yet.</td></tr>';return;}
+  tbody.innerHTML=agents.map(a=>`
+    <tr>
+      <td><strong>${a.name}</strong></td>
+      <td>${a.trustScore}</td>
+      <td>${a.autonomyPercentage}</td>
+      <td>${a.mandateLimit}</td>
+      <td>${a.autoSpendLimit}</td>
+      <td>${a.status}</td>
+      <td>${a.status==="ACTIVE"?`<button class="btn-sm btn-reject" onclick="revokeAgent('${a._id}')">Revoke</button>`:""}</td>
+    </tr>`).join("");
+  agents.forEach(a=>{
+    const o=document.createElement("option");o.value=a._id;o.textContent=a.name;select.appendChild(o);
+    const o2=document.createElement("option");o2.value=a._id;o2.textContent=a.name;tselect.appendChild(o2);
+  });
+}
+
+async function revokeAgent(id){
+  try{await api(`/api/agents/${id}/revoke`,{method:"POST"});await loadAgents();}catch(e){alert(e.message);}
+}
+
+async function requestPayment(){
+  try{
+    const body={
+      agentId:document.getElementById("payAgent").value,
+      recipientEmail:document.getElementById("recipientEmail").value.trim(),
+      amount:Number(document.getElementById("payAmount").value),
+      currency:document.getElementById("payCurrency").value,
+      purpose:document.getElementById("payPurpose").value.trim()
+    };
+    const p=await api("/api/payments/request",{method:"POST",body:JSON.stringify(body)});
+    showMsg("payMsg",`Decision: ${p.decision}`,"success");
+    await loadPayments();
+    await loadAgents();
+  }catch(e){showMsg("payMsg",e.message,"error");}
+}
+
+async function loadPayments(){
+  const payments=await api("/api/payments");
+  const tbody=document.getElementById("paymentTable");
+  if(!payments.length){tbody.innerHTML='<tr><td colspan="10" class="empty">No payments yet.</td></tr>';return;}
+  tbody.innerHTML=payments.map(p=>`
+    <tr>
+      <td>${p.agentName}</td>
+      <td>${p.amount} ${p.currency}</td>
+      <td>${p.category||""}</td>
+      <td>${p.riskScore??""}</td>
+      <td>${p.autonomyPercentage??""}</td>
+      <td><span class="badge badge-${p.decision}">${p.decision}</span></td>
+      <td>${p.humanDecision}</td>
+      <td>${p.paypalStatus||"-"}</td>
+      <td>${(p.redFlags||[]).join(", ")}</td>
+      <td>
+        ${p.decision==="MANUAL_APPROVAL_REQUIRED"&&p.humanDecision==="PENDING"
+          ? `<button class="btn-sm btn-approve" onclick="approvePayment('${p._id}')">Approve</button>
+             <button class="btn-sm btn-reject" onclick="rejectPayment('${p._id}')">Reject</button>` : ""}
+        <button class="btn-sm" style="background:#e5e7eb;color:#111" onclick="viewLogs('${p._id}')">Logs</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function approvePayment(id){
+  try{await api(`/api/payments/${id}/approve`,{method:"POST"});await loadPayments();await loadAgents();}catch(e){alert(e.message);}
+}
+async function rejectPayment(id){
+  try{await api(`/api/payments/${id}/reject`,{method:"POST"});await loadPayments();await loadAgents();}catch(e){alert(e.message);}
+}
+async function viewLogs(id){
+  const data=await api(`/api/payments/${id}`);
+  const panel=document.getElementById("logsPanel");
+  panel.style.display="block";
+  panel.innerHTML="<strong>Logs</strong><br>"+data.logs.map(l=>`${l.createdAt} [${l.actor}] ${l.action}: ${l.reason}`).join("<br>");
+}
+
+async function loadTrust(){
+  const id=document.getElementById("trustAgent").value;
+  if(!id) return;
+  const data=await api(`/api/agents/${id}/trust`);
+  const info=document.getElementById("trustInfo");
+  info.innerHTML=`Trust: ${data.trustScore} | Autonomy: ${data.autonomyPercentage}% | Auto-spend: ${data.autoSpendLimit} | Mandate: ${data.mandateLimit}<br>`+
+    (data.recentPayments||[]).map(p=>`${p.createdAt} ${p.decision} ${p.amount} ${p.category||""}`).join("<br>");
+}
+
+(async function init(){
+  await loadAgents();
+  await loadPayments();
+})();
+</script>
+</body>
+</html>
